@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CPS Tester</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Orbitron', sans-serif;
+      background: radial-gradient(circle, #000000 20%, #111111 100%);
+      color: #00ffff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    .container {
+      background-color: #111;
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 0 30px #0ff;
+      max-width: 600px;
+      width: 100%;
+      animation: glow 2s infinite alternate;
+    }
+
+    @keyframes glow {
+      from { box-shadow: 0 0 10px #0ff; }
+      to { box-shadow: 0 0 30px #00ffff, 0 0 60px #00ffff33; }
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 28px;
+      color: #00ffcc;
+      margin-bottom: 10px;
+    }
+
+    .button, .time-button, .reset-button {
+      background: transparent;
+      border: 2px solid #00ffff;
+      color: #00ffff;
+      padding: 10px;
+      margin: 5px;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      width: 100%;
+      transition: 0.2s ease;
+    }
+
+    .button:hover, .time-button:hover, .reset-button:hover,
+    .time-button.active {
+      background-color: #00ffff;
+      color: #000;
+    }
+
+    #cpsDisplay {
+      font-size: 24px;
+      color: #ff00ff;
+      margin: 15px 0;
+    }
+
+    #timer {
+      font-size: 16px;
+      margin-bottom: 10px;
+    }
+
+    .section {
+      background: #1c1c1c;
+      border-radius: 8px;
+      padding: 10px;
+      margin-top: 15px;
+      font-size: 14px;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+
+    .section-title {
+      font-weight: bold;
+      margin-bottom: 5px;
+      color: #00ffaa;
+    }
+
+    .panel {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 10px;
+    }
+
+    .click-target {
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      background: rgba(0, 255, 255, 0.6);
+      border: 2px solid #00ffff;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      animation: pulse 1s infinite;
+      cursor: pointer;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1) rotate(0deg); }
+      50% { transform: scale(1.2) rotate(45deg); }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+
+    @media (max-width: 500px) {
+      .button, .time-button, .reset-button {
+        font-size: 14px;
+        padding: 8px;
+      }
+    }
+
+    #chart {
+      width: 100%;
+      height: 250px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>CPS Tester</h1>
+    <div class="panel">
+      <button class="time-button active" data-time="1">1s</button>
+      <button class="time-button" data-time="5">5s</button>
+      <button class="time-button" data-time="10">10s</button>
+      <button class="time-button" data-time="50">50s</button>
+      <button class="time-button" data-time="100">100s</button>
+    </div>
+    <button id="startBtn" class="button">Start Test</button>
+    <div id="cpsDisplay">CPS: 0</div>
+    <div id="timer">Time: 0s</div>
+    <div class="section" id="history"><div class="section-title">CPS History:</div></div>
+    <div class="section" id="leaderboard"><div class="section-title">Leaderboard:</div></div>
+    <div class="section" id="keyTracker"><div class="section-title">Clicks per Key:</div></div>
+    <button id="resetBtn" class="reset-button">Reset History & Leaderboard</button>
+  </div>
+
+  <div id="clickTarget" class="click-target" style="display:none;"></div>
+
+  <canvas id="chart"></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    let clicks = 0, testDuration = 1, startTime, testRunning = false;
+    let interval, timeout;
+    let history = JSON.parse(localStorage.getItem("cpsHistory")) || [];
+    let leaderboard = JSON.parse(localStorage.getItem("cpsLeaderboard")) || [];
+    let keyClicks = {};
+    let reactionTime = false;
+    let chartData = [];
+
+    const startBtn = document.getElementById("startBtn");
+    const cpsDisplay = document.getElementById("cpsDisplay");
+    const timerDisplay = document.getElementById("timer");
+    const historyDisplay = document.getElementById("history");
+    const leaderboardDisplay = document.getElementById("leaderboard");
+    const keyTrackerDisplay = document.getElementById("keyTracker");
+    const resetBtn = document.getElementById("resetBtn");
+    const clickTarget = document.getElementById("clickTarget");
+    const chartCanvas = document.getElementById("chart");
+    const ctx = chartCanvas.getContext('2d');
+
+    const timeButtons = document.querySelectorAll(".time-button");
+    timeButtons.forEach(btn => {
+      btn.addEventListener("click", () => {
+        if (testRunning) return;
+        timeButtons.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        testDuration = parseInt(btn.dataset.time);
+      });
+    });
+
+    startBtn.addEventListener("click", () => {
+      if (testRunning) return;
+      clicks = 0;
+      keyClicks = {};
+      testRunning = true;
+      startTime = Date.now();
+      document.body.addEventListener("click", recordClick);
+      document.body.addEventListener("keydown", recordKey);
+      cpsDisplay.innerText = "CPS: 0";
+      timerDisplay.innerText = `Time: ${testDuration}s`;
+
+      if (reactionTime) {
+        startReactionTime();
+      } else {
+        countdownAndStartTest();
+      }
+    });
+
+    function startReactionTime() {
+      setTimeout(() => {
+        clickTarget.style.display = 'block';
+        clickTarget.style.animation = "pulse 1s infinite";
+        cpsDisplay.innerText = "Click Now!";
+        startTime = Date.now();
+      }, Math.random() * 4000 + 2000);
+    }
+
+    function countdownAndStartTest() {
+      let countdown = 3;
+      cpsDisplay.innerText = `Get Ready... ${countdown}`;
+      const countdownInterval = setInterval(() => {
+        countdown--;
+        cpsDisplay.innerText = `Get Ready... ${countdown}`;
+        if (countdown <= 0) {
+          clearInterval(countdownInterval);
+          cpsDisplay.innerText = "Go!";
+          setTimeout(startTest, 500);
+        }
+      }, 1000);
+    }
+
+    function startTest() {
+      clicks = 0;
+      keyClicks = {};
+      cpsDisplay.innerText = "CPS: 0";
+      timerDisplay.innerText = `Time: ${testDuration}s`;
+
+      interval = setInterval(() => {
+        const elapsed = (Date.now() - startTime) / 1000;
+        const cps = clicks / elapsed;
+        cpsDisplay.innerText = `CPS: ${cps.toFixed(2)}`;
+        chartData.push(cps);
+        updateChart();
+      }, 100);
+
+      timeout = setTimeout(() => {
+        endTest();
+      }, testDuration * 1000);
+    }
+
+    function recordClick(e) {
+      if (!testRunning || e.target === clickTarget) return;
+      clicks++;
+    }
+
+    function recordKey(e) {
+      if (!testRunning) return;
+      const key = e.key.toUpperCase();
+      keyClicks[key] = (keyClicks[key] || 0) + 1;
+      clicks++;
+    }
+
+    function endTest() {
+      testRunning = false;
+      clearInterval(interval);
+      clearTimeout(timeout);
+      document.body.removeEventListener("click", recordClick);
+      document.body.removeEventListener("keydown", recordKey);
+
+      cpsDisplay.innerText = "Test Ended!";
+      const finalCPS = clicks / testDuration;
+      history.push({ cps: finalCPS, time: new Date().toISOString() });
+      localStorage.setItem("cpsHistory", JSON.stringify(history));
+      updateHistoryDisplay();
+      updateLeaderboard(finalCPS);
+      updateKeyTracker();
+    }
+
+    function updateHistoryDisplay() {
+      historyDisplay.innerHTML = `<div class="section-title">CPS History:</div>`;
+      history.forEach(entry => {
+        const historyItem = document.createElement("div");
+        historyItem.textContent = `CPS: ${entry.cps.toFixed(2)} at ${new Date(entry.time).toLocaleString()}`;
+        historyDisplay.appendChild(historyItem);
+      });
+    }
+
+    function updateLeaderboard(finalCPS) {
+      leaderboard.push({ cps: finalCPS, time: new Date().toISOString() });
+      leaderboard.sort((a, b) => b.cps - a.cps);
+      leaderboard = leaderboard.slice(0, 5);  // Keep top 5 scores
+      localStorage.setItem("cpsLeaderboard", JSON.stringify(leaderboard));
+
+      leaderboardDisplay.innerHTML = `<div class="section-title">Leaderboard:</div>`;
+      leaderboard.forEach((entry, idx) => {
+        const leaderboardItem = document.createElement("div");
+        leaderboardItem.textContent = `${idx + 1}. CPS: ${entry.cps.toFixed(2)} at ${new Date(entry.time).toLocaleString()}`;
+        leaderboardDisplay.appendChild(leaderboardItem);
+      });
+    }
+
+    function updateKeyTracker() {
+      keyTrackerDisplay.innerHTML = `<div class="section-title">Clicks per Key:</div>`;
+      for (const key in keyClicks) {
+        const keyItem = document.createElement("div");
+        keyItem.textContent = `${key}: ${keyClicks[key]}`;
+        keyTrackerDisplay.appendChild(keyItem);
+      }
+    }
+
+    resetBtn.addEventListener("click", () => {
+      localStorage.removeItem("cpsHistory");
+      localStorage.removeItem("cpsLeaderboard");
+      history = [];
+      leaderboard = [];
+      updateHistoryDisplay();
+      updateLeaderboard();
+    });
+
+    function updateChart() {
+      if (!chartData.length) return;
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: Array(chartData.length).fill(''),
+          datasets: [{
+            label: 'CPS over Time',
+            data: chartData,
+            borderColor: '#ff00ff',
+            fill: false,
+            tension: 0.1
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: { enabled: false }
+          },
+          scales: {
+            x: { display: false },
+            y: { min: 0 }
+          }
+        }
+      });
+    }
+  </script>
+</body>
+</html>
